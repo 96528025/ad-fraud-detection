@@ -2,6 +2,10 @@ import json
 import time
 import sys
 import os
+from pathlib import Path
+
+import joblib
+import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -13,22 +17,28 @@ from consumer.feature_extractor import FeatureExtractor
 
 KAFKA_BROKER = "localhost:9092"
 TOPIC = "ad-clicks"
-ML_THRESHOLD = 0.5  # ML 评分高于这个值 → BLOCK
+ML_THRESHOLD = 0.5
+MODEL_PATH = Path(__file__).parent.parent / "model" / "fraud_model.pkl"
+
+FEATURES = [
+    "ip_click_count_1min",
+    "ip_click_count_1hour",
+    "device_ip_count",
+    "click_interval_ms",
+    "hour_of_day",
+    "app_id",
+    "channel_id",
+    "os",
+    "is_blacklisted",
+]
+
+# 启动时加载模型（只加载一次）
+_model = joblib.load(MODEL_PATH)
 
 
 def ml_score(features: dict) -> float:
-    """
-    占位函数：返回基于特征的简单评分。
-    Phase 3 会替换成真正的 XGBoost 模型。
-    """
-    score = 0.0
-    if features["ip_click_count_1min"] > 5:
-        score += 0.4
-    if features["click_interval_ms"] != -1 and features["click_interval_ms"] < 100:
-        score += 0.3
-    if features["device_ip_count"] > 20:
-        score += 0.3
-    return min(score, 1.0)
+    df = pd.DataFrame([features])[FEATURES]
+    return float(_model.predict_proba(df)[0][1])
 
 
 def main():
