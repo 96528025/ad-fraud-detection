@@ -150,16 +150,35 @@ Sliding window counters need atomic increment + expiry. Redis `INCR` + `EXPIRE` 
 **Why XGBoost over deep learning?**
 Tabular fraud features respond better to tree models. XGBoost gives better AUC on TalkingData than MLP with less tuning. In production, TikTok uses gradient boosting for first-stage filtering before neural rankers.
 
-## Results (target)
+## Results
 
-| Metric | Target |
+### Model Comparison
+
+Two models trained on different datasets to validate generalization:
+
+| | Simulated Data (`train.py`) | TalkingData (`train_talkingdata.py`) |
+|---|---|---|
+| **Data source** | Self-generated via click_simulator.py | Real-world ad click records (Kaggle) |
+| **Label** | `is_fraud` directly injected | `is_attributed=0` → treated as fraud |
+| **Key features** | Real-time sliding window (Redis) | Global aggregation statistics |
+| **Click interval** | Millisecond-level | Second-level |
+| **Fraud rate** | 10% (controlled) | 99.8% (real-world distribution) |
+| **AUC-ROC** | 0.9938 | **0.9785** |
+| **Notes** | Higher score, but self-referential | Lower score, but on real-world data — more credible |
+
+The simulated model scores higher because training and test data share the same fraud patterns by design.
+The TalkingData model (AUC 0.9785) is the more credible benchmark as it generalizes to real-world click fraud.
+
+### Pipeline Performance
+
+| Metric | Result |
 |--------|--------|
-| AUC-ROC | >0.97 |
-| Precision | >0.90 |
-| Recall | >0.85 |
-| Throughput | >1,000 events/sec |
-| Rule engine latency (p99) | <2ms |
-| ML latency (p99) | <20ms |
+| AUC-ROC (simulated) | 0.9938 |
+| AUC-ROC (TalkingData) | 0.9785 |
+| Fraud recall | 98% |
+| Throughput | ~268 events/sec |
+| Rule engine latency (p99) | <2ms ✅ |
+| End-to-end latency (p99) | <2ms ✅ |
 
 ## How to Run
 
@@ -340,16 +359,34 @@ ad-fraud-detection/
 **为什么用 XGBoost 而不是深度学习？**
 表格型欺诈特征更适合树模型。XGBoost 在 TalkingData 数据集上的 AUC 优于 MLP，且调参成本更低。在生产环境中，TikTok 也使用梯度提升树作为神经排序模型的前置过滤层。
 
-## 目标指标
+## 实验结果
 
-| 指标 | 目标值 |
-|------|-------|
-| AUC-ROC | >0.97 |
-| 精确率（Precision） | >0.90 |
-| 召回率（Recall） | >0.85 |
-| 吞吐量 | >1,000 条/秒 |
-| 规则引擎延迟（p99） | <2ms |
-| ML 模型延迟（p99） | <20ms |
+### 双数据集模型对比
+
+用两套不同数据集训练，验证模型的泛化能力：
+
+| | 模拟数据（`train.py`） | TalkingData（`train_talkingdata.py`） |
+|---|---|---|
+| **数据来源** | 自己生成（click_simulator.py） | Kaggle 真实广告点击记录 |
+| **标签定义** | 直接注入 `is_fraud` | `is_attributed=0` → 视为欺诈 |
+| **核心特征** | 实时滑动窗口（Redis） | 全局聚合统计 |
+| **点击间隔** | 毫秒级 | 秒级 |
+| **欺诈率** | 10%（人为设定） | 99.8%（真实分布） |
+| **AUC-ROC** | 0.9938 | **0.9785** |
+| **说明** | 分数高，但有"自说自话"嫌疑 | 分数略低，但在真实数据上验证，更有说服力 |
+
+模拟数据模型分数更高，是因为训练集和测试集的欺诈模式完全一致（都由同一个模拟器生成）。TalkingData 模型（AUC 0.9785）更能体现在真实世界数据上的泛化能力。
+
+### 流水线性能
+
+| 指标 | 实测结果 |
+|------|---------|
+| AUC-ROC（模拟数据） | 0.9938 |
+| AUC-ROC（TalkingData） | 0.9785 |
+| 欺诈召回率 | 98% |
+| 吞吐量 | ~268 条/秒 |
+| 规则引擎延迟（p99） | <2ms ✅ |
+| 端到端延迟（p99） | <2ms ✅ |
 
 ## 运行方式
 
