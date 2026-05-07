@@ -4,6 +4,8 @@ A production-inspired fraud detection pipeline that processes ad click streams i
 
 Inspired by the architecture used in large-scale ads integrity systems (e.g., TikTok Business Integrity, Meta Ads Quality).
 
+![Demo](docs/demo.gif)
+
 ## Architecture
 
 ```
@@ -136,7 +138,7 @@ ad-fraud-detection/
 - [x] Flask app serving real-time stats from SQLite (port 5001)
 - [x] Charts: fraud rate over time (line chart), top blocked IPs (bar chart)
 - [x] Recent events table with ML scores, rule names, latency
-- [ ] README with demo GIF
+- [x] README with demo GIF
 
 ## Key Design Decisions
 
@@ -216,6 +218,8 @@ Freja Ren · [GitHub](https://github.com/96528025)
 基于生产环境架构设计的实时欺诈检测流水线，通过 Kafka 处理广告点击流，结合规则引擎与机器学习模型，识别并拦截虚假流量。
 
 架构灵感来源于大规模广告完整性系统（如 TikTok Business Integrity、Meta Ads Quality）的实际设计。
+
+![Demo](docs/demo.gif)
 
 ## 系统架构
 
