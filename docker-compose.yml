@@ -1,0 +1,25 @@
+version: "3.8"
+
+services:
+  redpanda:
+    image: redpandadata/redpanda:latest
+    container_name: ad-fraud-kafka
+    command:
+      - redpanda
+      - start
+      - --overprovisioned
+      - --smp 1
+      - --memory 512M
+      - --reserve-memory 0M
+      - --node-id 0
+      - --check=false
+      - --kafka-addr PLAINTEXT://0.0.0.0:9092
+      - --advertise-kafka-addr PLAINTEXT://localhost:9092
+    ports:
+      - "9092:9092"
+
+  redis:
+    image: redis:7-alpine
+    container_name: ad-fraud-redis
+    ports:
+      - "6379:6379"
