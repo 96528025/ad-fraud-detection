@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8">
+  <title>Ad Fraud Detection Dashboard</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+           background: #0f1117; color: #e2e8f0; }
+
+    header { padding: 20px 32px; border-bottom: 1px solid #2d3748;
+             display: flex; align-items: center; gap: 12px; }
+    header h1 { font-size: 1.25rem; font-weight: 600; }
+    .live-dot { width: 10px; height: 10px; border-radius: 50%;
+                background: #48bb78; animation: pulse 1.5s infinite; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
+    .grid { display: grid; grid-template-columns: repeat(4, 1fr);
+            gap: 16px; padding: 24px 32px; }
+    .card { background: #1a202c; border-radius: 12px; padding: 20px;
+            border: 1px solid #2d3748; }
+    .card .label { font-size: 0.75rem; color: #718096; text-transform: uppercase;
+                   letter-spacing: 0.05em; margin-bottom: 8px; }
+    .card .value { font-size: 2rem; font-weight: 700; }
+    .card .value.red   { color: #fc8181; }
+    .card .value.green { color: #68d391; }
+    .card .value.blue  { color: #63b3ed; }
+    .card .value.yellow{ color: #f6e05e; }
+
+    .charts { display: grid; grid-template-columns: 2fr 1fr;
+              gap: 16px; padding: 0 32px 24px; }
+    .chart-card { background: #1a202c; border-radius: 12px; padding: 20px;
+                  border: 1px solid #2d3748; }
+    .chart-card h2 { font-size: 0.875rem; color: #a0aec0; margin-bottom: 16px; }
+
+    table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
+    th { text-align: left; color: #718096; padding: 6px 8px;
+         border-bottom: 1px solid #2d3748; }
+    td { padding: 6px 8px; border-bottom: 1px solid #1a202c; }
+    tr:hover td { background: #2d3748; }
+    .badge { padding: 2px 8px; border-radius: 4px; font-size: 0.7rem; font-weight: 600; }
+    .badge.block { background: #742a2a; color: #fc8181; }
+    .badge.allow { background: #1c4532; color: #68d391; }
+
+    .bottom { padding: 0 32px 32px; }
+    .bottom h2 { font-size: 0.875rem; color: #a0aec0; margin-bottom: 12px; }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="live-dot"></div>
+  <h1>Ad Fraud Detection — Real-Time Dashboard</h1>
+</header>
+
+<div class="grid">
+  <div class="card">
+    <div class="label">Total Events</div>
+    <div class="value blue" id="total">—</div>
+  </div>
+  <div class="card">
+    <div class="label">Blocked</div>
+    <div class="value red" id="blocked">—</div>
+  </div>
+  <div class="card">
+    <div class="label">Fraud Rate (5 min)</div>
+    <div class="value yellow" id="fraud_rate">—</div>
+  </div>
+  <div class="card">
+    <div class="label">Avg Latency</div>
+    <div class="value green" id="latency">—</div>
+  </div>
+</div>
+
+<div class="charts">
+  <div class="chart-card">
+    <h2>Fraud Rate Over Time (last 10 min)</h2>
+    <canvas id="timelineChart" height="80"></canvas>
+  </div>
+  <div class="chart-card">
+    <h2>Top Blocked IPs</h2>
+    <canvas id="ipChart" height="160"></canvas>
+  </div>
+</div>
+
+<div class="bottom">
+  <h2>Recent Events</h2>
+  <div class="card">
+    <table>
+      <thead>
+        <tr>
+          <th>Time</th>
+          <th>IP</th>
+          <th>Device</th>
+          <th>Action</th>
+          <th>Rule</th>
+          <th>ML Score</th>
+          <th>Latency</th>
+        </tr>
+      </thead>
+      <tbody id="recentTable"></tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+  // 折线图
+  const tlCtx = document.getElementById("timelineChart").getContext("2d");
+  const tlChart = new Chart(tlCtx, {
+    type: "line",
+    data: { labels: [], datasets: [{
+      label: "Fraud Rate %",
+      data: [],
+      borderColor: "#fc8181",
+      backgroundColor: "rgba(252,129,129,0.1)",
+      tension: 0.3, fill: true, pointRadius: 3,
+    }]},
+    options: { scales: {
+      x: { ticks: { color: "#718096" }, grid: { color: "#2d3748" } },
+      y: { ticks: { color: "#718096" }, grid: { color: "#2d3748" },
+           min: 0, max: 100 }
+    }, plugins: { legend: { labels: { color: "#a0aec0" } } } }
+  });
+
+  // 柱状图（Top IPs）
+  const ipCtx = document.getElementById("ipChart").getContext("2d");
+  const ipChart = new Chart(ipCtx, {
+    type: "bar",
+    data: { labels: [], datasets: [{
+      label: "Blocked Count",
+      data: [],
+      backgroundColor: "rgba(252,129,129,0.7)",
+    }]},
+    options: {
+      indexAxis: "y",
+      scales: {
+        x: { ticks: { color: "#718096" }, grid: { color: "#2d3748" } },
+        y: { ticks: { color: "#718096", font: { size: 10 } }, grid: { color: "#2d3748" } }
+      },
+      plugins: { legend: { display: false } }
+    }
+  });
+
+  async function refresh() {
+    // 统计数据
+    const s = await fetch("/api/stats").then(r => r.json());
+    const sum = s.summary;
+    document.getElementById("total").textContent    = (sum.total || 0).toLocaleString();
+    document.getElementById("blocked").textContent  = (sum.blocked || 0).toLocaleString();
+    document.getElementById("fraud_rate").textContent = (sum.fraud_rate_5min || 0) + "%";
+    document.getElementById("latency").textContent  = (sum.avg_latency_ms || 0) + " ms";
+
+    // 折线图
+    const tl = s.timeline || [];
+    tlChart.data.labels   = tl.map(r => `${-r.minute_ago}m ago`);
+    tlChart.data.datasets[0].data = tl.map(r =>
+      r.total > 0 ? ((r.blocked / r.total) * 100).toFixed(1) : 0
+    );
+    tlChart.update();
+
+    // Top IPs 柱状图
+    const ips = s.top_blocked_ips || [];
+    ipChart.data.labels = ips.map(r => r.ip);
+    ipChart.data.datasets[0].data = ips.map(r => r.count);
+    ipChart.update();
+
+    // 最近事件表格
+    const rows = await fetch("/api/recent").then(r => r.json());
+    const tbody = document.getElementById("recentTable");
+    tbody.innerHTML = rows.map(r => `
+      <tr>
+        <td>${r.time}</td>
+        <td>${r.ip}</td>
+        <td style="color:#a0aec0">${r.device_id}</td>
+        <td><span class="badge ${r.final_action === 'BLOCK' ? 'block' : 'allow'}">${r.final_action}</span></td>
+        <td style="color:#a0aec0">${r.rule_name || "—"}</td>
+        <td>${r.ml_score || "—"}</td>
+        <td>${r.latency_ms} ms</td>
+      </tr>
+    `).join("");
+  }
+
+  refresh();
+  setInterval(refresh, 3000);  // 每3秒刷新
+</script>
+</body>
+</html>

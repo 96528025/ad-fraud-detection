@@ -4,7 +4,8 @@ __pycache__/
 *.pkl
 data/*.csv
 data/*.parquet
+data/*.db
+data/*.db-journal
 .env
-venv/
 *.egg-info/
 .DS_Store
