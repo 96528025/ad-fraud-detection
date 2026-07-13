@@ -6,6 +6,8 @@ Inspired by the architecture used in large-scale ads integrity systems (e.g., Ti
 
 ![Demo](docs/demo.gif)
 
+**Highlights:** XGBoost fraud model at **AUC 0.9785 on real Kaggle TalkingData** (0.9938 on simulated), **98% fraud recall**, two-tier detection with **rule-engine p99 < 2ms** and **~268 clicks/sec** end-to-end. Kafka + Redis + XGBoost + Flask. *(Full methodology and the honest simulated-vs-real comparison are in [Results](#实验结果) below.)*
+
 ## Architecture
 
 ```
