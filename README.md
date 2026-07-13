@@ -6,7 +6,7 @@ Inspired by the architecture used in large-scale ads integrity systems (e.g., Ti
 
 ![Demo](docs/demo.gif)
 
-**Highlights:** XGBoost fraud model at **AUC 0.9785 on real Kaggle TalkingData** (0.9938 on simulated), **98% fraud recall**, two-tier detection with **rule-engine p99 < 2ms** and **~268 clicks/sec** end-to-end. Kafka + Redis + XGBoost + Flask. *(Full methodology and the honest simulated-vs-real comparison are in [Results](#实验结果) below.)*
+**Highlights:** XGBoost fraud model at **AUC 0.9546 on real Kaggle TalkingData** (leak-free eval; 0.9938 on simulated), two-tier detection with **sub-millisecond rule-engine median** (end-to-end p50 ~2ms, p99 ~4–9ms) and **~268 clicks/sec** sustained throughput. Kafka + Redis + XGBoost + Flask. *(Full methodology, the latency benchmark, and the honest simulated-vs-real comparison are in [Results](#实验结果) below.)*
 
 ## Architecture
 
@@ -127,13 +127,13 @@ ad-fraud-detection/
 ### Phase 3 — ML Model (Week 2–3)
 - [x] `train.py`: feature engineering on simulated data + TalkingData dataset
   - Features: ip_click_rate, device_click_count, app_channel_ratio, hour_of_day, click_interval_mean
-- [x] Train XGBoost classifier — AUC 0.9785 on TalkingData (real-world)
+- [x] Train XGBoost classifier — AUC 0.9546 on TalkingData (real-world, leak-free eval)
 - [x] `ml_detector.py`: load model, score events in real time
 - [x] `train_talkingdata.py`: real-world dataset validation (TalkingData Kaggle)
 
 ### Phase 4 — Integration & Performance (Week 3–4)
-- [x] End-to-end pipeline: simulator → Kafka → consumer → Redis + SQLite (~268 events/sec)
-- [x] Latency measurement: rule engine p99 <2ms ✅, end-to-end p99 <2ms ✅
+- [x] End-to-end pipeline: simulator → Kafka → consumer → Redis + SQLite (sustained ~268 events/sec, producer rate-limited)
+- [x] Latency measurement (`consumer/benchmark_latency.py`, local dev): rule engine p50 <0.2ms / p99 ~2ms; end-to-end p50 ~2ms / p99 ~4–9ms (tail is load-dependent)
 - [x] IP blacklist auto-expiry (TTL in Redis)
 
 ### Phase 5 — Dashboard (Week 4)
@@ -166,25 +166,25 @@ Two models trained on different datasets to validate generalization:
 |---|---|---|
 | **Data source** | Self-generated via click_simulator.py | Real-world ad click records (Kaggle) |
 | **Label** | `is_fraud` directly injected | `is_attributed=0` → treated as fraud |
-| **Key features** | Real-time sliding window (Redis) | Global aggregation statistics |
+| **Key features** | Real-time sliding window (Redis) | Count features fit on **train split only** (no leakage) |
 | **Click interval** | Millisecond-level | Second-level |
 | **Fraud rate** | 10% (controlled) | 99.8% (real-world distribution) |
-| **AUC-ROC** | 0.9938 | **0.9785** |
-| **Notes** | Higher score, but self-referential | Lower score, but on real-world data — more credible |
+| **AUC-ROC** | 0.9938 | **0.9546** |
+| **Notes** | Higher score, but self-referential | Lower but leak-free — the credible benchmark |
 
 The simulated model scores higher because training and test data share the same fraud patterns by design.
-The TalkingData model (AUC 0.9785) is the more credible benchmark as it generalizes to real-world click fraud.
+The TalkingData model (AUC 0.9546) is the more credible benchmark: it uses real-world data, and its aggregate count features (e.g. `app_count`) are fit only on the training split and mapped onto the test split, so no test-set information leaks into training. (An earlier version computed these counts over the full dataset before the split, which inflated AUC to 0.9785.)
 
 ### Pipeline Performance
 
 | Metric | Result |
 |--------|--------|
 | AUC-ROC (simulated) | 0.9938 |
-| AUC-ROC (TalkingData) | 0.9785 |
-| Fraud recall | 98% |
-| Throughput | ~268 events/sec |
-| Rule engine latency (p99) | <2ms ✅ |
-| End-to-end latency (p99) | <2ms ✅ |
+| AUC-ROC (TalkingData, leak-free) | 0.9546 |
+| Fraud-class recall | 98% (majority class; base rate 99.8%) |
+| Throughput | sustained ~268 events/sec (producer rate-limited to ~500/sec; not a capacity ceiling) |
+| Rule engine latency | p50 <0.2ms, p99 ~2ms (1–6ms across runs) |
+| End-to-end latency | p50 ~2ms, p99 ~4–9ms (up to ~16ms under load) |
 
 ## How to Run
 
@@ -340,13 +340,13 @@ ad-fraud-detection/
 ### 第三阶段 — ML 模型（第 2–3 周）
 - [x] `train.py`：模拟数据 + TalkingData 双数据集特征工程
   - 特征：IP 点击频率、设备点击数、App/渠道比例、小时分布、点击间隔均值
-- [x] 训练 XGBoost 分类器 — TalkingData AUC 0.9785（真实数据验证）
+- [x] 训练 XGBoost 分类器 — TalkingData AUC 0.9546（真实数据验证，无泄漏评估）
 - [x] `ml_detector.py`：加载模型，对事件实时评分
 - [x] `train_talkingdata.py`：TalkingData Kaggle 真实数据集验证
 
 ### 第四阶段 — 整合与性能（第 3–4 周）
-- [x] 端到端联调：模拟器 → Kafka → 消费者 → Redis + SQLite（约 268 条/秒）
-- [x] 延迟测量：规则引擎 p99 <2ms ✅，端到端 p99 <2ms ✅
+- [x] 端到端联调：模拟器 → Kafka → 消费者 → Redis + SQLite（稳定约 268 条/秒，producer 限速）
+- [x] 延迟测量（`consumer/benchmark_latency.py`，本地开发环境）：规则引擎 p50 <0.2ms / p99 ~2ms；端到端 p50 ~2ms / p99 ~4–9ms（长尾随负载波动）
 - [x] IP 黑名单自动过期（Redis TTL）
 
 ### 第五阶段 — 实时看板（第 4 周）
@@ -379,24 +379,24 @@ ad-fraud-detection/
 |---|---|---|
 | **数据来源** | 自己生成（click_simulator.py） | Kaggle 真实广告点击记录 |
 | **标签定义** | 直接注入 `is_fraud` | `is_attributed=0` → 视为欺诈 |
-| **核心特征** | 实时滑动窗口（Redis） | 全局聚合统计 |
+| **核心特征** | 实时滑动窗口（Redis） | 计数特征**仅在训练集拟合**（无泄漏） |
 | **点击间隔** | 毫秒级 | 秒级 |
 | **欺诈率** | 10%（人为设定） | 99.8%（真实分布） |
-| **AUC-ROC** | 0.9938 | **0.9785** |
-| **说明** | 分数高，但有"自说自话"嫌疑 | 分数略低，但在真实数据上验证，更有说服力 |
+| **AUC-ROC** | 0.9938 | **0.9546** |
+| **说明** | 分数高，但有"自说自话"嫌疑 | 分数略低但无泄漏，是可信基准 |
 
-模拟数据模型分数更高，是因为训练集和测试集的欺诈模式完全一致（都由同一个模拟器生成）。TalkingData 模型（AUC 0.9785）更能体现在真实世界数据上的泛化能力。
+模拟数据模型分数更高，是因为训练集和测试集的欺诈模式完全一致（都由同一个模拟器生成）。TalkingData 模型（AUC 0.9546）更可信：用的是真实数据，且 `app_count` 等聚合计数特征只在训练集上拟合、再映射到测试集，测试集信息不会泄漏进训练。（早期版本在切分前用全量数据算这些计数，把 AUC 虚高到了 0.9785。）
 
 ### 流水线性能
 
 | 指标 | 实测结果 |
 |------|---------|
 | AUC-ROC（模拟数据） | 0.9938 |
-| AUC-ROC（TalkingData） | 0.9785 |
-| 欺诈召回率 | 98% |
-| 吞吐量 | ~268 条/秒 |
-| 规则引擎延迟（p99） | <2ms ✅ |
-| 端到端延迟（p99） | <2ms ✅ |
+| AUC-ROC（TalkingData，无泄漏） | 0.9546 |
+| 欺诈类召回率 | 98%（多数类；基准占比 99.8%） |
+| 吞吐量 | 稳定约 268 条/秒（producer 限速至约 500/秒；非容量上限） |
+| 规则引擎延迟 | p50 <0.2ms，p99 ~2ms（多次运行 1–6ms） |
+| 端到端延迟 | p50 ~2ms，p99 ~4–9ms（高负载下可达 ~16ms） |
 
 ## 运行方式
 

@@ -26,44 +26,63 @@ DATA_PATH  = Path("/Users/angelren/.cache/kagglehub/competitions/talkingdata-adt
 MODEL_PATH = Path(__file__).parent / "fraud_model_talkingdata.pkl"
 
 
-def load_and_engineer(path: Path) -> pd.DataFrame:
+# 各计数特征依赖的分组键（组合键在 add_composite_keys 里构造）
+COUNT_KEYS = {
+    "ip_count":         "ip",
+    "ip_app_count":     "ip_app",
+    "ip_device_count":  "ip_device",
+    "ip_os_count":      "ip_os",
+    "ip_channel_count": "ip_channel",
+    "ip_app_os_count":  "ip_app_os",
+    "app_count":        "app",
+    "channel_count":    "channel",
+}
+
+
+def load_raw(path: Path) -> pd.DataFrame:
+    """只做行内(row-local)特征：不涉及任何跨行统计，因此不会泄漏。"""
     print("加载数据...")
     df = pd.read_csv(path, parse_dates=["click_time"])
     print(f"  样本数: {len(df):,}  欺诈率: {(1 - df['is_attributed'].mean())*100:.1f}%")
 
-    print("特征工程...")
+    # 时间特征（每行独立，无泄漏）
+    df["hour"] = df["click_time"].dt.hour
+    df["day"]  = df["click_time"].dt.day
+    df["wday"] = df["click_time"].dt.dayofweek
 
-    # 时间特征
-    df["hour"]    = df["click_time"].dt.hour
-    df["day"]     = df["click_time"].dt.day
-    df["wday"]    = df["click_time"].dt.dayofweek
+    # 组合键（用于后续 groupby 计数）
+    df["ip_app"]     = df["ip"].astype(str) + "_" + df["app"].astype(str)
+    df["ip_device"]  = df["ip"].astype(str) + "_" + df["device"].astype(str)
+    df["ip_os"]      = df["ip"].astype(str) + "_" + df["os"].astype(str)
+    df["ip_channel"] = df["ip"].astype(str) + "_" + df["channel"].astype(str)
+    df["ip_app_os"]  = df["ip"].astype(str) + "_" + df["app"].astype(str) + "_" + df["os"].astype(str)
 
-    # 排序（用于计算点击间隔）
+    # 标签：is_attributed=0 → 欺诈(1)，is_attributed=1 → 正常(0)
+    df["is_fraud"] = (df["is_attributed"] == 0).astype(int)
+    return df
+
+
+def fit_count_maps(train_df: pd.DataFrame) -> dict:
+    """频率特征只在训练集上拟合，避免测试集信息泄漏进特征。"""
+    return {
+        feat: train_df.groupby(key).size()
+        for feat, key in COUNT_KEYS.items()
+    }
+
+
+def apply_features(df: pd.DataFrame, count_maps: dict) -> pd.DataFrame:
+    """把训练集拟合的计数映射套用到该 split；未见过的键 → 0。
+    click_interval 在各 split 内部独立计算（不跨 split，故无泄漏）。"""
     df = df.sort_values("click_time").reset_index(drop=True)
 
-    # 点击间隔（同一 IP 相邻两次点击的秒数差）
+    # 点击间隔（同一 IP 相邻两次点击的秒数差）——仅用本 split 内的相邻点击
     df["prev_click_time"] = df.groupby("ip")["click_time"].shift(1)
     df["click_interval_sec"] = (df["click_time"] - df["prev_click_time"]).dt.total_seconds()
     df["click_interval_sec"] = df["click_interval_sec"].fillna(-1)
 
-    # 聚合特征：各维度点击数量
-    df["ip_app"]    = df["ip"].astype(str) + "_" + df["app"].astype(str)
-    df["ip_device"] = df["ip"].astype(str) + "_" + df["device"].astype(str)
-    df["ip_os"]     = df["ip"].astype(str) + "_" + df["os"].astype(str)
-    df["ip_channel"]= df["ip"].astype(str) + "_" + df["channel"].astype(str)
-    df["ip_app_os"] = df["ip"].astype(str) + "_" + df["app"].astype(str) + "_" + df["os"].astype(str)
-
-    df["ip_count"]         = df.groupby("ip")["ip"].transform("count")
-    df["ip_app_count"]     = df.groupby("ip_app")["ip"].transform("count")
-    df["ip_device_count"]  = df.groupby("ip_device")["ip"].transform("count")
-    df["ip_os_count"]      = df.groupby("ip_os")["ip"].transform("count")
-    df["ip_channel_count"] = df.groupby("ip_channel")["ip"].transform("count")
-    df["ip_app_os_count"]  = df.groupby("ip_app_os")["ip"].transform("count")
-    df["app_count"]        = df.groupby("app")["app"].transform("count")
-    df["channel_count"]    = df.groupby("channel")["channel"].transform("count")
-
-    # 标签：is_attributed=0 → 欺诈(1)，is_attributed=1 → 正常(0)
-    df["is_fraud"] = (df["is_attributed"] == 0).astype(int)
+    # 计数特征：用训练集频率映射
+    for feat, key in COUNT_KEYS.items():
+        df[feat] = df[key].map(count_maps[feat]).fillna(0).astype(int)
 
     return df
 
@@ -90,17 +109,22 @@ FEATURES = [
 
 
 def main():
-    df = load_and_engineer(DATA_PATH)
+    df = load_raw(DATA_PATH)
 
-    X = df[FEATURES]
-    y = df["is_fraud"]
-
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.2, random_state=42, stratify=y
+    # 先切分，再做特征工程 —— 计数特征只在训练集上拟合，杜绝泄漏
+    print("特征工程（切分后，仅用训练集拟合计数特征）...")
+    train_df, test_df = train_test_split(
+        df, test_size=0.2, random_state=42, stratify=df["is_fraud"]
     )
+    count_maps = fit_count_maps(train_df)
+    train_df = apply_features(train_df, count_maps)
+    test_df  = apply_features(test_df,  count_maps)
+
+    X_train, y_train = train_df[FEATURES], train_df["is_fraud"]
+    X_test,  y_test  = test_df[FEATURES],  test_df["is_fraud"]
     print(f"\n  训练集: {len(X_train):,}  测试集: {len(X_test):,}")
 
-    fraud_ratio = y.sum() / len(y)
+    fraud_ratio = df["is_fraud"].sum() / len(df)
     scale = (1 - fraud_ratio) / fraud_ratio
 
     print("\n训练 XGBoost...")
